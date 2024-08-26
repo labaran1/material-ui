@@ -1,732 +1,494 @@
 import * as React from 'react';
-import LZString from 'lz-string';
 import PropTypes from 'prop-types';
-import clsx from 'clsx';
 import copy from 'clipboard-copy';
-import { useSelector, useDispatch } from 'react-redux';
-import { alpha, makeStyles, useTheme } from '@material-ui/core/styles';
-import IconButton from '@material-ui/core/IconButton';
-import useMediaQuery from '@material-ui/core/useMediaQuery';
-import Collapse from '@material-ui/core/Collapse';
-import Fade from '@material-ui/core/Fade';
-import ToggleButton from '@material-ui/core/ToggleButton';
-import ToggleButtonGroup from '@material-ui/core/ToggleButtonGroup';
-import { JavaScript as JavaScriptIcon, TypeScript as TypeScriptIcon } from '@material-ui/docs';
-import NoSsr from '@material-ui/core/NoSsr';
-import EditIcon from '@material-ui/icons/Edit';
-import CodeIcon from '@material-ui/icons/Code';
-import FileCopyIcon from '@material-ui/icons/FileCopy';
-import Snackbar from '@material-ui/core/Snackbar';
-import Menu from '@material-ui/core/Menu';
-import MenuItem from '@material-ui/core/MenuItem';
-import MoreVertIcon from '@material-ui/icons/MoreVert';
-import Tooltip from '@material-ui/core/Tooltip';
-import RefreshIcon from '@material-ui/icons/Refresh';
-import ResetFocusIcon from '@material-ui/icons/CenterFocusWeak';
-import HighlightedCode from 'docs/src/modules/components/HighlightedCode';
-import DemoSandboxed from 'docs/src/modules/components/DemoSandboxed';
-import { AdCarbonInline } from 'docs/src/modules/components/AdCarbon';
-import getDemoConfig from 'docs/src/modules/utils/getDemoConfig';
-import getJsxPreview from 'docs/src/modules/utils/getJsxPreview';
-import { getCookie } from 'docs/src/modules/utils/helpers';
-import { ACTION_TYPES, CODE_VARIANTS } from 'docs/src/modules/constants';
+import { useRouter } from 'next/router';
+import { debounce } from '@mui/material/utils';
+import { alpha, styled } from '@mui/material/styles';
+import { styled as joyStyled } from '@mui/joy/styles';
+import { Tabs } from '@mui/base/Tabs';
+import { TabPanel } from '@mui/base/TabPanel';
+import { unstable_useId as useId } from '@mui/utils';
+import IconButton from '@mui/material/IconButton';
+import Box from '@mui/material/Box';
+import Collapse from '@mui/material/Collapse';
+import NoSsr from '@mui/material/NoSsr';
+import { HighlightedCode } from '@mui/docs/HighlightedCode';
+import { CodeTab, CodeTabList } from '@mui/docs/HighlightedCodeWithTabs';
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded';
+import LibraryAddCheckRoundedIcon from '@mui/icons-material/LibraryAddCheckRounded';
+import DemoSandbox from 'docs/src/modules/components/DemoSandbox';
+import ReactRunner from 'docs/src/modules/components/ReactRunner';
+import DemoEditor from 'docs/src/modules/components/DemoEditor';
+import DemoEditorError from 'docs/src/modules/components/DemoEditorError';
+import { pathnameToLanguage } from 'docs/src/modules/utils/helpers';
+import { useCodeVariant } from 'docs/src/modules/utils/codeVariant';
+import { useCodeStyling } from 'docs/src/modules/utils/codeStylingSolution';
+import { CODE_VARIANTS, CODE_STYLING } from 'docs/src/modules/constants';
+import { useUserLanguage, useTranslate } from '@mui/docs/i18n';
+import stylingSolutionMapping from 'docs/src/modules/utils/stylingSolutionMapping';
+import DemoToolbarRoot from 'docs/src/modules/components/DemoToolbarRoot';
+import { AdCarbonInline } from '@mui/docs/Ad';
+import { BrandingProvider, blue, blueDark, grey } from '@mui/docs/branding';
 
-function compress(object) {
-  return LZString.compressToBase64(JSON.stringify(object))
-    .replace(/\+/g, '-') // Convert '+' to '-'
-    .replace(/\//g, '_') // Convert '/' to '_'
-    .replace(/=+$/, ''); // Remove ending '='
+/**
+ * Removes leading spaces (indentation) present in the `.tsx` previews
+ * to be able to replace the existing code with the incoming dynamic code
+ * @param {string} input
+ */
+function trimLeadingSpaces(input = '') {
+  return input.replace(/^\s+/gm, '');
 }
 
-function addHiddenInput(form, name, value) {
-  const input = document.createElement('input');
-  input.type = 'hidden';
-  input.name = name;
-  input.value = value;
-  form.appendChild(input);
+const DemoToolbar = React.lazy(() => import('./DemoToolbar'));
+
+function DemoToolbarFallback() {
+  const t = useTranslate();
+
+  // Sync with styles from DemoToolbar, we can't import the styles
+  return <Box sx={{ height: 42 }} aria-busy aria-label={t('demoToolbarLabel')} role="toolbar" />;
 }
 
 function getDemoName(location) {
-  return location.replace(/(.+?)(\w+)\.\w+$$/, '$2');
+  return location.endsWith('.js') || location.endsWith('.tsx')
+    ? location.replace(/(.+?)(\w+)\.\w+$$/, '$2')
+    : // the demos with multiple styling solution point to directory
+      location.split('/').pop();
 }
 
-function useDemoData(codeVariant, demo, githubLocation) {
-  const userLanguage = useSelector((state) => state.options.userLanguage);
-  const title = `${getDemoName(githubLocation)} Material Demo`;
-  if (codeVariant === CODE_VARIANTS.TS && demo.rawTS) {
+function useDemoData(codeVariant, demo, githubLocation, codeStyling) {
+  const userLanguage = useUserLanguage();
+  const router = useRouter();
+  const { canonicalAs } = pathnameToLanguage(router.asPath);
+
+  return React.useMemo(() => {
+    let productId;
+    let name = 'Material UI';
+    if (canonicalAs.startsWith('/joy-ui/')) {
+      productId = 'joy-ui';
+      name = 'Joy UI';
+    } else if (canonicalAs.startsWith('/base-ui/')) {
+      productId = 'base-ui';
+      name = 'Base UI';
+    } else if (canonicalAs.startsWith('/x/')) {
+      name = 'MUI X';
+    }
+
+    let codeOptions = {};
+    if (codeStyling === CODE_STYLING.SYSTEM) {
+      if (codeVariant === CODE_VARIANTS.TS && demo.rawTS) {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.TS,
+          githubLocation: githubLocation.replace(/\.js$/, '.tsx'),
+          raw: demo.rawTS,
+          module: demo.moduleTS,
+          Component: demo.tsx ?? null,
+          sourceLanguage: 'tsx',
+        };
+        if (demo.relativeModules) {
+          codeOptions.relativeModules = demo.relativeModules[CODE_VARIANTS.TS];
+        }
+      } else {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.JS,
+          githubLocation,
+          raw: demo.raw,
+          module: demo.module,
+          Component: demo.js,
+          sourceLanguage: 'jsx',
+        };
+        if (demo.relativeModules) {
+          codeOptions.relativeModules = demo.relativeModules[CODE_VARIANTS.JS];
+        }
+      }
+    } else if (codeStyling === CODE_STYLING.TAILWIND) {
+      if (codeVariant === CODE_VARIANTS.TS && demo.rawTailwindTS) {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.TS,
+          githubLocation: githubLocation.replace(/\/system\/index\.js$/, '/tailwind/index.tsx'),
+          raw: demo.rawTailwindTS,
+          module: demo.moduleTS,
+          Component: demo.tsxTailwind,
+          sourceLanguage: 'tsx',
+        };
+      } else {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.JS,
+          githubLocation: githubLocation.replace(/\/system\/index\.js$/, '/tailwind/index.js'),
+          raw: demo.rawTailwind ?? demo.raw,
+          module: demo.module,
+          Component: demo.jsTailwind ?? demo.js,
+          sourceLanguage: 'jsx',
+        };
+      }
+    } else if (codeStyling === CODE_STYLING.CSS) {
+      if (codeVariant === CODE_VARIANTS.TS && demo.rawCSSTS) {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.TS,
+          githubLocation: githubLocation.replace(/\/system\/index\.js$/, '/css/index.tsx'),
+          raw: demo.rawCSSTS,
+          module: demo.moduleTS,
+          Component: demo.tsxCSS,
+          sourceLanguage: 'tsx',
+        };
+      } else {
+        codeOptions = {
+          codeVariant: CODE_VARIANTS.JS,
+          githubLocation: githubLocation.replace(/\/system\/index\.js$/, '/css/index.js'),
+          raw: demo.rawCSS ?? demo.raw,
+          module: demo.module,
+          Component: demo.jsCSS ?? demo.js,
+          sourceLanguage: 'jsx',
+        };
+      }
+    }
+
+    let jsxPreview = demo.jsxPreview;
+    if (codeStyling === CODE_STYLING.TAILWIND && demo.tailwindJsxPreview) {
+      jsxPreview = demo.tailwindJsxPreview;
+    } else if (codeStyling === CODE_STYLING.CSS && demo.cssJsxPreview) {
+      jsxPreview = demo.cssJsxPreview;
+    }
+
     return {
-      codeVariant: CODE_VARIANTS.TS,
-      githubLocation: githubLocation.replace(/\.js$/, '.tsx'),
+      scope: demo.scope,
+      jsxPreview,
+      ...codeOptions,
+      title: `${getDemoName(githubLocation)} demo — ${name}`,
+      productId,
       language: userLanguage,
-      raw: demo.rawTS,
-      Component: demo.tsx,
-      sourceLanguage: 'tsx',
-      title,
+      codeStyling,
     };
-  }
-
-  return {
-    codeVariant: CODE_VARIANTS.JS,
-    githubLocation,
-    language: userLanguage,
-    raw: demo.raw,
-    Component: demo.js,
-    sourceLanguage: 'jsx',
-    title,
-  };
+  }, [canonicalAs, codeVariant, demo, githubLocation, userLanguage, codeStyling]);
 }
 
-// TODO: replace with React.useOpaqueReference if it is released
-function useUniqueId(prefix) {
-  // useOpaqueReference
-  const [id, setId] = React.useState();
-  React.useEffect(() => {
-    setId(Math.random().toString(36).slice(2));
-  }, []);
-
-  return id ? `${prefix}${id}` : id;
-}
-
-const useDemoToolbarStyles = makeStyles(
-  (theme) => {
-    return {
-      root: {
-        display: 'none',
-        [theme.breakpoints.up('sm')]: {
-          display: 'flex',
-          flip: false,
-          top: 0,
-          right: theme.spacing(1),
-          height: theme.spacing(6),
-        },
-        justifyContent: 'space-between',
-      },
-      toggleButtonGroup: {
-        margin: '8px 0',
-      },
-      toggleButton: {
-        padding: '4px 9px',
-      },
-      tooltip: {
-        zIndex: theme.zIndex.appBar - 1,
-      },
-    };
-  },
-  { name: 'DemoToolbar' },
-);
-
-const alwaysTrue = () => true;
-
-/**
- * @param {React.Ref<HTMLElement>[]} controlRefs
- * @param {object} [options]
- * @param {(index: number) => boolean} [options.isFocusableControl] In case certain controls become unfocusable
- * @param {number} [options.defaultActiveIndex]
- */
-function useToolbar(controlRefs, options = {}) {
-  const { defaultActiveIndex = 0, isFocusableControl = alwaysTrue } = options;
-  const [activeControlIndex, setActiveControlIndex] = React.useState(defaultActiveIndex);
-
-  // TODO: do we need to do this during layout practically? It's technically
-  // a bit too late since we allow user interaction between layout and passive effects
-  React.useEffect(() => {
-    setActiveControlIndex((currentActiveControlIndex) => {
-      if (!isFocusableControl(currentActiveControlIndex)) {
-        return defaultActiveIndex;
-      }
-      return currentActiveControlIndex;
-    });
-  }, [defaultActiveIndex, isFocusableControl]);
-
-  // controlRefs.findIndex(controlRef => controlRef.current = element)
-  function findControlIndex(element) {
-    let controlIndex = -1;
-    controlRefs.forEach((controlRef, index) => {
-      if (controlRef.current === element) {
-        controlIndex = index;
-      }
-    });
-    return controlIndex;
-  }
-
-  function handleControlFocus(event) {
-    const nextActiveControlIndex = findControlIndex(event.target);
-    if (nextActiveControlIndex !== -1) {
-      setActiveControlIndex(nextActiveControlIndex);
-    } else {
-      // make sure DCE works
-      // eslint-disable-next-line no-lonely-if
-      if (process.env.NODE_ENV !== 'production') {
-        console.error(
-          'Material-UI: The toolbar contains a focusable element that is not controlled by the toolbar. ' +
-            'Make sure you have attached `getControlProps(index)` to every focusable element within this toolbar.',
-        );
-      }
-    }
-  }
-
-  let handleToolbarFocus;
-  if (process.env.NODE_ENV !== 'production') {
-    handleToolbarFocus = (event) => {
-      if (findControlIndex(event.target) === -1) {
-        console.error(
-          'Material-UI: The toolbar contains a focusable element that is not controlled by the toolbar. ' +
-            'Make sure you have attached `getControlProps(index)` to every focusable element within this toolbar.',
-        );
-      }
-    };
-  }
-
-  const { direction } = useTheme();
-
-  function handleToolbarKeyDown(event) {
-    // We handle toolbars where controls can be hidden temporarily.
-    // When a control is hidden we can't move focus to it and have to exclude
-    // it from the order.
-    let currentFocusableControlIndex = -1;
-    const focusableControls = [];
-    controlRefs.forEach((controlRef, index) => {
-      const { current: control } = controlRef;
-      if (index === activeControlIndex) {
-        currentFocusableControlIndex = focusableControls.length;
-      }
-      if (control !== null && isFocusableControl(index)) {
-        focusableControls.push(control);
-      }
-    });
-
-    const prevControlKey = direction === 'ltr' ? 'ArrowLeft' : 'ArrowRight';
-    const nextControlKey = direction === 'ltr' ? 'ArrowRight' : 'ArrowLeft';
-
-    let nextFocusableIndex = -1;
-    switch (event.key) {
-      case prevControlKey:
-        nextFocusableIndex =
-          (currentFocusableControlIndex - 1 + focusableControls.length) % focusableControls.length;
-        break;
-      case nextControlKey:
-        nextFocusableIndex = (currentFocusableControlIndex + 1) % focusableControls.length;
-        break;
-      case 'Home':
-        nextFocusableIndex = 0;
-        break;
-      case 'End':
-        nextFocusableIndex = focusableControls.length - 1;
-        break;
-      default:
-        break;
-    }
-
-    if (nextFocusableIndex !== -1) {
-      event.preventDefault();
-      focusableControls[nextFocusableIndex].focus();
-    }
-  }
-
-  function getControlProps(index) {
-    return {
-      onFocus: handleControlFocus,
-      ref: controlRefs[index],
-      tabIndex: index === activeControlIndex ? 0 : -1,
-    };
-  }
-
-  return {
-    getControlProps,
-    toolbarProps: {
-      // TODO: good opportunity to warn on missing `aria-label`
-      onFocus: handleToolbarFocus,
-      onKeyDown: handleToolbarKeyDown,
-      role: 'toolbar',
-    },
-  };
-}
-
-function DemoToolbar(props) {
-  const {
-    codeOpen,
-    codeVariant,
-    demo,
-    demoData,
-    demoId,
-    demoHovered,
-    demoName,
-    demoOptions,
-    demoSourceId,
-    initialFocusRef,
-    onCodeOpenChange,
-    onResetDemoClick,
-    openDemoSource,
-    showPreview,
-  } = props;
-
-  const classes = useDemoToolbarStyles();
-
-  const dispatch = useDispatch();
-  const t = useSelector((state) => state.options.t);
-
-  const hasTSVariant = demo.rawTS;
-  const renderedCodeVariant = () => {
-    if (codeVariant === CODE_VARIANTS.TS && hasTSVariant) {
-      return CODE_VARIANTS.TS;
-    }
-    return CODE_VARIANTS.JS;
-  };
-
-  const handleCodeLanguageClick = (event, clickedCodeVariant) => {
-    if (codeVariant !== clickedCodeVariant) {
-      dispatch({
-        type: ACTION_TYPES.OPTIONS_CHANGE,
-        payload: {
-          codeVariant: clickedCodeVariant,
-        },
-      });
-    }
-  };
-
-  const handleCodeSandboxClick = () => {
-    const demoConfig = getDemoConfig(demoData);
-    const parameters = compress({
-      files: {
-        'package.json': {
-          content: {
-            name: demoConfig.title,
-            description: demoConfig.description,
-            dependencies: demoConfig.dependencies,
-            devDependencies: {
-              'react-scripts': 'latest',
-              ...demoConfig.devDependencies,
-            },
-            main: demoConfig.main,
-            scripts: demoConfig.scripts,
-            // We used `title` previously but only inference from `name` is documented.
-            // TODO revisit once https://github.com/codesandbox/codesandbox-client/issues/4983 is resolved.
-            title: demoConfig.title,
-          },
-        },
-        ...Object.keys(demoConfig.files).reduce((files, name) => {
-          files[name] = { content: demoConfig.files[name] };
-          return files;
-        }, {}),
-      },
-    });
-
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.target = '_blank';
-    form.action = 'https://codeSandbox.io/api/v1/sandboxes/define';
-    addHiddenInput(form, 'parameters', parameters);
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-  };
-
-  const [anchorEl, setAnchorEl] = React.useState(null);
-  const handleMoreClick = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-  const handleMoreClose = () => {
-    setAnchorEl(null);
-  };
-
-  const [snackbarOpen, setSnackbarOpen] = React.useState(false);
-  const [snackbarMessage, setSnackbarMessage] = React.useState(undefined);
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
-  };
-  const handleCopyClick = async () => {
-    try {
-      await copy(demoData.raw);
-      setSnackbarMessage(t('copiedSource'));
-      setSnackbarOpen(true);
-    } finally {
-      handleMoreClose();
-    }
-  };
-
-  const handleStackBlitzClick = () => {
-    const demoConfig = getDemoConfig(demoData);
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.target = '_blank';
-    form.action = 'https://stackblitz.com/run';
-    addHiddenInput(form, 'project[template]', 'javascript');
-    addHiddenInput(form, 'project[title]', demoConfig.title);
-    addHiddenInput(form, 'project[description]', demoConfig.description);
-    addHiddenInput(form, 'project[dependencies]', JSON.stringify(demoConfig.dependencies));
-    addHiddenInput(form, 'project[devDependencies]', JSON.stringify(demoConfig.devDependencies));
-    Object.keys(demoConfig.files).forEach((key) => {
-      const value = demoConfig.files[key];
-      addHiddenInput(form, `project[files][${key}]`, value);
-    });
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-    handleMoreClose();
-  };
-
-  const createHandleCodeSourceLink = (anchor) => async () => {
-    try {
-      await copy(`${window.location.href.split('#')[0]}#${anchor}`);
-      setSnackbarMessage(t('copiedSourceLink'));
-      setSnackbarOpen(true);
-    } finally {
-      handleMoreClose();
-    }
-  };
-
-  const [sourceHintSeen, setSourceHintSeen] = React.useState(false);
-  React.useEffect(() => {
-    setSourceHintSeen(getCookie('sourceHintSeen'));
-  }, []);
-  const handleCodeOpenClick = () => {
-    document.cookie = `sourceHintSeen=true;path=/;max-age=31536000`;
-    onCodeOpenChange();
-    setSourceHintSeen(true);
-  };
-
-  function handleResetFocusClick() {
-    initialFocusRef.current.focusVisible();
-  }
-
-  const showSourceHint = demoHovered && !sourceHintSeen;
-
-  let showCodeLabel;
-  if (codeOpen) {
-    showCodeLabel = showPreview ? t('hideFullSource') : t('hideSource');
-  } else {
-    showCodeLabel = showPreview ? t('showFullSource') : t('showSource');
-  }
-
-  const atLeastSmallViewport = useMediaQuery((theme) => theme.breakpoints.up('sm'));
-
-  const controlRefs = [
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-    React.useRef(null),
-  ];
-  // if the code is not open we hide the first two language controls
-  const isFocusableControl = React.useCallback((index) => (codeOpen ? true : index >= 2), [
-    codeOpen,
-  ]);
-  const { getControlProps, toolbarProps } = useToolbar(controlRefs, {
-    defaultActiveIndex: 2,
-    isFocusableControl,
-  });
-
-  return (
-    <React.Fragment>
-      <div aria-label={t('demoToolbarLabel')} className={classes.root} {...toolbarProps}>
-        <NoSsr defer>
-          <Fade in={codeOpen}>
-            <ToggleButtonGroup
-              className={classes.toggleButtonGroup}
-              exclusive
-              value={renderedCodeVariant()}
-              onChange={handleCodeLanguageClick}
-            >
-              <ToggleButton
-                className={classes.toggleButton}
-                value={CODE_VARIANTS.JS}
-                aria-label={t('showJSSource')}
-                data-ga-event-category="demo"
-                data-ga-event-action="source-js"
-                data-ga-event-label={demoOptions.demo}
-                {...getControlProps(0)}
-              >
-                <JavaScriptIcon />
-              </ToggleButton>
-              <ToggleButton
-                className={classes.toggleButton}
-                value={CODE_VARIANTS.TS}
-                disabled={!hasTSVariant}
-                aria-label={t('showTSSource')}
-                data-ga-event-category="demo"
-                data-ga-event-action="source-ts"
-                data-ga-event-label={demoOptions.demo}
-                {...getControlProps(1)}
-              >
-                <TypeScriptIcon />
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Fade>
-          <div>
-            <Tooltip
-              classes={{ popper: classes.tooltip }}
-              key={showSourceHint}
-              open={showSourceHint && atLeastSmallViewport ? true : undefined}
-              PopperProps={{ disablePortal: true }}
-              title={showCodeLabel}
-              placement="bottom"
-            >
-              <IconButton
-                aria-controls={openDemoSource ? demoSourceId : null}
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="expand"
-                onClick={handleCodeOpenClick}
-                color={demoHovered ? 'primary' : 'default'}
-                {...getControlProps(2)}
-              >
-                <CodeIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            {demoOptions.hideEditButton ? null : (
-              <Tooltip
-                classes={{ popper: classes.tooltip }}
-                title={t('codesandbox')}
-                placement="bottom"
-              >
-                <IconButton
-                  data-ga-event-category="demo"
-                  data-ga-event-label={demoOptions.demo}
-                  data-ga-event-action="codesandbox"
-                  onClick={handleCodeSandboxClick}
-                  {...getControlProps(3)}
-                >
-                  <EditIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            <Tooltip
-              classes={{ popper: classes.tooltip }}
-              title={t('copySource')}
-              placement="bottom"
-            >
-              <IconButton
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="copy"
-                onClick={handleCopyClick}
-                {...getControlProps(4)}
-              >
-                <FileCopyIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip
-              classes={{ popper: classes.tooltip }}
-              title={t('resetFocus')}
-              placement="bottom"
-            >
-              <IconButton
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="reset-focus"
-                onClick={handleResetFocusClick}
-                {...getControlProps(5)}
-              >
-                <ResetFocusIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <Tooltip
-              classes={{ popper: classes.tooltip }}
-              title={t('resetDemo')}
-              placement="bottom"
-            >
-              <IconButton
-                aria-controls={demoId}
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="reset"
-                onClick={onResetDemoClick}
-                {...getControlProps(6)}
-              >
-                <RefreshIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            <IconButton
-              onClick={handleMoreClick}
-              aria-owns={anchorEl ? 'demo-menu-more' : undefined}
-              aria-haspopup="true"
-              {...getControlProps(7)}
-            >
-              <MoreVertIcon fontSize="small" />
-            </IconButton>
-            <Menu
-              id="demo-menu-more"
-              anchorEl={anchorEl}
-              open={Boolean(anchorEl)}
-              onClose={handleMoreClose}
-              getContentAnchorEl={null}
-              anchorOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              transformOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-            >
-              <MenuItem
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="github"
-                component="a"
-                href={demoData.githubLocation}
-                target="_blank"
-                rel="noopener nofollow"
-                onClick={handleMoreClose}
-              >
-                {t('viewGitHub')}
-              </MenuItem>
-              {demoOptions.hideEditButton ? null : (
-                <MenuItem
-                  data-ga-event-category="demo"
-                  data-ga-event-label={demoOptions.demo}
-                  data-ga-event-action="stackblitz"
-                  onClick={handleStackBlitzClick}
-                >
-                  {t('stackblitz')}
-                </MenuItem>
-              )}
-              <MenuItem
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="copy-js-source-link"
-                onClick={createHandleCodeSourceLink(`${demoName}.js`)}
-              >
-                {t('copySourceLinkJS')}
-              </MenuItem>
-              <MenuItem
-                data-ga-event-category="demo"
-                data-ga-event-label={demoOptions.demo}
-                data-ga-event-action="copy-ts-source-link"
-                onClick={createHandleCodeSourceLink(`${demoName}.tsx`)}
-              >
-                {t('copySourceLinkTS')}
-              </MenuItem>
-            </Menu>
-          </div>
-        </NoSsr>
-      </div>
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={3000}
-        onClose={handleSnackbarClose}
-        message={snackbarMessage}
-      />
-    </React.Fragment>
+function useDemoElement({ demoData, editorCode, setDebouncedError, liveDemoActive }) {
+  const debouncedSetError = React.useMemo(
+    () => debounce(setDebouncedError, 300),
+    [setDebouncedError],
   );
+
+  React.useEffect(() => {
+    return () => {
+      debouncedSetError.clear();
+    };
+  }, [debouncedSetError]);
+
+  // Memoize to avoid rendering the demo more than it needs to be.
+  // For example, avoid a render when the demo is hovered.
+  const BundledComponent = React.useMemo(() => <demoData.Component />, [demoData]);
+  const LiveComponent = React.useMemo(
+    () => (
+      <ReactRunner
+        scope={demoData.scope}
+        onError={debouncedSetError}
+        code={
+          editorCode.isPreview
+            ? trimLeadingSpaces(demoData.raw).replace(
+                trimLeadingSpaces(demoData.jsxPreview),
+                editorCode.value,
+              )
+            : editorCode.value
+        }
+      />
+    ),
+    [demoData, debouncedSetError, editorCode.isPreview, editorCode.value],
+  );
+
+  // No need for a live environment if the code matches with the component rendered server-side.
+  return editorCode.value === editorCode.initialEditorCode && liveDemoActive === false
+    ? BundledComponent
+    : LiveComponent;
 }
 
-DemoToolbar.propTypes = {
-  codeOpen: PropTypes.bool.isRequired,
-  codeVariant: PropTypes.string.isRequired,
-  demo: PropTypes.object.isRequired,
-  demoData: PropTypes.object.isRequired,
-  demoHovered: PropTypes.bool.isRequired,
-  demoId: PropTypes.string,
-  demoName: PropTypes.string.isRequired,
-  demoOptions: PropTypes.object.isRequired,
-  demoSourceId: PropTypes.string,
-  initialFocusRef: PropTypes.shape({ current: PropTypes.object }).isRequired,
-  onCodeOpenChange: PropTypes.func.isRequired,
-  onResetDemoClick: PropTypes.func.isRequired,
-  openDemoSource: PropTypes.bool.isRequired,
-  showPreview: PropTypes.bool.isRequired,
-};
+const Root = styled('div')(({ theme }) => ({
+  marginBottom: 24,
+  marginLeft: theme.spacing(-2),
+  marginRight: theme.spacing(-2),
+  [theme.breakpoints.up('sm')]: {
+    marginLeft: 0,
+    marginRight: 0,
+  },
+}));
 
-const useStyles = makeStyles(
-  (theme) => ({
-    root: {
-      marginBottom: 40,
-      marginLeft: theme.spacing(-2),
-      marginRight: theme.spacing(-2),
-      [theme.breakpoints.up('sm')]: {
-        padding: theme.spacing(0, 1),
-        marginLeft: 0,
-        marginRight: 0,
+const DemoRootMaterial = styled('div', {
+  shouldForwardProp: (prop) => prop !== 'hideToolbar' && prop !== 'bg',
+})(({ theme }) => ({
+  position: 'relative',
+  margin: 'auto',
+  display: 'flex',
+  justifyContent: 'center',
+  variants: [
+    {
+      props: ({ hideToolbar }) => hideToolbar,
+      style: {
+        [theme.breakpoints.up('sm')]: {
+          borderRadius: 12,
+        },
       },
     },
-    demo: {
-      position: 'relative',
-      outline: 0,
-      margin: 'auto',
-      display: 'flex',
-      justifyContent: 'center',
-      [theme.breakpoints.up('sm')]: {
-        borderRadius: theme.shape.borderRadius,
+    {
+      props: ({ hideToolbar }) => !hideToolbar,
+      style: {
+        [theme.breakpoints.up('sm')]: {
+          borderRadius: '12px 12px 0 0',
+        },
       },
     },
-    /* Isolate the demo with an outline. */
-    demoBgOutlined: {
-      padding: theme.spacing(3),
-      border: `1px solid ${alpha(theme.palette.action.active, 0.12)}`,
-      borderLeftWidth: 0,
-      borderRightWidth: 0,
-      [theme.breakpoints.up('sm')]: {
-        borderLeftWidth: 1,
-        borderRightWidth: 1,
+    {
+      props: {
+        bg: 'outlined',
+      },
+      style: {
+        [theme.breakpoints.up('sm')]: {
+          borderLeftWidth: 1,
+          borderRightWidth: 1,
+        },
       },
     },
-    /* Prepare the background to display an inner elevation. */
-    demoBgTrue: {
-      padding: theme.spacing(3),
-      backgroundColor: theme.palette.background.level2,
+    {
+      props: {
+        bg: 'inline',
+      },
+      style: {
+        [theme.breakpoints.up('sm')]: {
+          padding: theme.spacing(0),
+        },
+      },
     },
-    /* Make no difference between the demo and the markdown. */
-    demoBgInline: {
-      // Maintain alignment with the markdown text
-      [theme.breakpoints.down('sm')]: {
+    {
+      props: {
+        bg: 'gradient',
+      },
+      style: {
+        [theme.breakpoints.up('sm')]: {
+          padding: theme.spacing(12, 8),
+          borderLeftWidth: 1,
+          borderRightWidth: 1,
+        },
+      },
+    },
+    {
+      props: {
+        bg: 'outlined',
+      },
+      style: {
         padding: theme.spacing(3),
+        backgroundColor: (theme.vars || theme).palette.background.paper,
+        border: `1px solid ${(theme.vars || theme).palette.divider}`,
+        borderLeftWidth: 0,
+        borderRightWidth: 0,
+        ...theme.applyDarkStyles({
+          backgroundColor: alpha(theme.palette.primaryDark[700], 0.1),
+        }),
       },
     },
-    demoHiddenToolbar: {
-      paddingTop: theme.spacing(2),
-      [theme.breakpoints.up('sm')]: {
-        paddingTop: theme.spacing(3),
+    {
+      props: {
+        bg: 'playground',
       },
-    },
-    code: {
-      display: 'none',
-      padding: 0,
-      marginBottom: theme.spacing(1),
-      marginRight: 0,
-      [theme.breakpoints.up('sm')]: {
-        display: 'block',
-      },
-      '& pre': {
+      style: {
+        backgroundColor: (theme.vars || theme).palette.background.paper,
+        border: `1px solid ${(theme.vars || theme).palette.divider}`,
         overflow: 'auto',
-        lineHeight: 1.5,
-        margin: '0 !important',
-        maxHeight: 'min(68vh, 1000px)',
       },
     },
-    anchorLink: {
-      marginTop: -64, // height of toolbar
-      position: 'absolute',
+    {
+      props: {
+        bg: true,
+      },
+      style: {
+        padding: theme.spacing(3),
+        backgroundColor: alpha(theme.palette.grey[50], 0.5),
+        border: `1px solid ${(theme.vars || theme).palette.divider}`,
+        ...theme.applyDarkStyles({
+          backgroundColor: alpha(theme.palette.primaryDark[700], 0.4),
+        }),
+      },
     },
-    initialFocus: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      width: theme.spacing(4),
-      height: theme.spacing(4),
-      pointerEvents: 'none',
+    {
+      props: {
+        bg: 'gradient',
+      },
+      style: {
+        overflow: 'auto',
+        padding: theme.spacing(4, 2),
+        border: `1px solid ${(theme.vars || theme).palette.divider}`,
+        borderLeftWidth: 0,
+        borderRightWidth: 0,
+        backgroundClip: 'padding-box',
+        backgroundColor: alpha(theme.palette.primary[50], 0.2),
+        backgroundImage: `radial-gradient(120% 140% at 50% 10%, transparent 40%, ${alpha(theme.palette.primary[100], 0.2)} 70%)`,
+        ...theme.applyDarkStyles({
+          backgroundColor: (theme.vars || theme).palette.primaryDark[900],
+          backgroundImage: `radial-gradient(120% 140% at 50% 10%, transparent 30%, ${alpha(theme.palette.primary[900], 0.3)} 80%)`,
+        }),
+      },
     },
+  ],
+}));
+
+const DemoRootJoy = joyStyled('div', {
+  shouldForwardProp: (prop) => prop !== 'hideToolbar' && prop !== 'bg',
+})(({ theme, hideToolbar, bg }) => ({
+  position: 'relative',
+  margin: 'auto',
+  display: 'flex',
+  justifyContent: 'center',
+  [theme.breakpoints.up('sm')]: {
+    borderRadius: hideToolbar ? 12 : '12px 12px 0 0',
+    ...(bg === 'outlined' && {
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+    }),
+    /* Make no difference between the demo and the markdown. */
+    ...(bg === 'inline' && {
+      padding: theme.spacing(0),
+    }),
+  },
+  /* Isolate the demo with an outline. */
+  ...(bg === 'outlined' && {
+    padding: theme.spacing(3),
+    border: `1px solid`,
+    borderColor: grey[100],
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+    backgroundColor: 'transparent',
+    ...theme.applyDarkStyles({
+      borderColor: alpha(blueDark[500], 0.3),
+      backgroundColor: alpha(theme.palette.neutral[900], 0.8),
+    }),
   }),
-  { name: 'Demo' },
-);
+  /* Prepare the background to display an inner elevation. */
+  ...(bg === true && {
+    padding: theme.spacing(3),
+    backgroundColor: theme.vars.palette.background.level2,
+  }),
+  /* Mostly meant for introduction demos. */
+  ...(bg === 'gradient' && {
+    [theme.breakpoints.up('sm')]: {
+      borderRadius: 12,
+    },
+    borderRadius: 0,
+    padding: theme.spacing(0),
+    overflow: 'auto',
+    backgroundColor: alpha(blue[50], 0.5),
+    border: `1px solid`,
+    borderColor: grey[100],
+    backgroundImage: `radial-gradient(at 51% 52%, ${alpha(blue[50], 0.5)} 0px, transparent 50%),
+      radial-gradient(at 80% 0%, #FFFFFF 0px, transparent 20%),
+      radial-gradient(at 0% 95%, ${alpha(blue[100], 0.3)}, transparent 40%),
+      radial-gradient(at 0% 20%, ${blue[50]} 0px, transparent 50%),
+      radial-gradient(at 93% 85%, ${alpha(blue[100], 0.2)} 0px, transparent 50%);`,
+    ...theme.applyDarkStyles({
+      backgroundColor: alpha(blue[900], 0.1),
+      borderColor: alpha(blueDark[700], 1),
+      backgroundImage: `radial-gradient(at 51% 52%, ${alpha(
+        blueDark[700],
+        0.5,
+      )} 0px, transparent 50%),
+    radial-gradient(at 80% 0%, ${alpha(blue[900], 0.3)} 0px, transparent 50%),
+    radial-gradient(at 0% 95%,  ${alpha(blue[900], 0.5)} 0px, transparent 50%),
+    radial-gradient(at 0% 5%, ${alpha(blue[900], 0.5)} 0px, transparent 35%),
+    radial-gradient(at 93% 85%, ${alpha(blue[900], 0.3)} 0px, transparent 50%);`,
+    }),
+  }),
+}));
+
+const DemoCodeViewer = styled(HighlightedCode)(() => ({
+  '& pre': {
+    margin: 0,
+    marginTop: -1,
+    maxHeight: 'min(68vh, 1000px)',
+    maxWidth: 'initial',
+    borderRadius: 0,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+  },
+}));
+
+const AnchorLink = styled('div')({
+  marginTop: -64, // height of toolbar
+  position: 'absolute',
+});
+
+const InitialFocus = styled(IconButton)(({ theme }) => ({
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  width: theme.spacing(4),
+  height: theme.spacing(4),
+  pointerEvents: 'none',
+}));
+
+const selectionOverride = (theme) => ({
+  cursor: 'pointer',
+  '&.base--selected': {
+    color: (theme.vars || theme).palette.primary[700],
+    backgroundColor: (theme.vars || theme).palette.primary[50],
+    borderColor: (theme.vars || theme).palette.primary[200],
+    ...theme.applyDarkStyles({
+      color: (theme.vars || theme).palette.primary[200],
+      backgroundColor: alpha(theme.palette.primary[900], 0.4),
+      borderColor: (theme.vars || theme).palette.primary[800],
+    }),
+  },
+});
 
 export default function Demo(props) {
-  const { demo, demoOptions, disableAd, githubLocation } = props;
-  const classes = useStyles();
-  const t = useSelector((state) => state.options.t);
-  const codeVariant = useSelector((state) => state.options.codeVariant);
-  const demoData = useDemoData(codeVariant, demo, githubLocation);
+  const { demo, demoOptions, disableAd, githubLocation, mode } = props;
 
-  const [demoHovered, setDemoHovered] = React.useState(false);
-  const handleDemoHover = (event) => {
-    setDemoHovered(event.type === 'mouseenter');
-  };
+  if (process.env.NODE_ENV !== 'production') {
+    if (demoOptions.hideToolbar === false) {
+      throw new Error(
+        [
+          '"hideToolbar": false is already the default.',
+          `Please remove the property in {{"demo": "${demoOptions.demo}", …}}.`,
+        ].join('\n'),
+      );
+    }
+    if (demoOptions.hideToolbar === true && demoOptions.defaultCodeOpen === true) {
+      throw new Error(
+        [
+          '"hideToolbar": true, "defaultCodeOpen": true combination is invalid.',
+          `Please remove one of the properties in {{"demo": "${demoOptions.demo}", …}}.`,
+        ].join('\n'),
+      );
+    }
+    if (demoOptions.hideToolbar === true && demoOptions.disableAd === true) {
+      throw new Error(
+        [
+          '"hideToolbar": true, "disableAd": true combination is invalid.',
+          `Please remove one of the properties in {{"demo": "${demoOptions.demo}", …}}.`,
+        ].join('\n'),
+      );
+    }
+  }
 
-  const DemoComponent = demoData.Component;
+  if (
+    (demoOptions.demo.endsWith('.ts') || demoOptions.demo.endsWith('.tsx')) &&
+    demoOptions.hideToolbar !== true
+  ) {
+    throw new Error(
+      [
+        `The following demos use TS directly: ${demoOptions.demo}.`,
+        '',
+        'Please run "pnpm docs:typescript:formatted" to generate a JS version and reference it:',
+        `{{"demo": "${demoOptions.demo.replace(/\.(.*)$/, '.js')}", …}}.`,
+        '',
+        "Otherwise, if it's not a code demo hide the toolbar:",
+        `{{"demo": "${demoOptions.demo}", "hideToolbar": true, …}}.`,
+      ].join('\n'),
+    );
+  }
+
+  const t = useTranslate();
+  const codeVariant = useCodeVariant();
+  const styleSolution = useCodeStyling();
+
+  const demoData = useDemoData(codeVariant, demo, githubLocation, styleSolution);
+
+  const hasNonSystemDemos = demo.rawTailwind || demo.rawTailwindTS || demo.rawCSS || demo.rawCSSTs;
+
   const demoName = getDemoName(demoData.githubLocation);
   const demoSandboxedStyle = React.useMemo(
     () => ({
@@ -738,10 +500,10 @@ export default function Demo(props) {
 
   if (demoOptions.bg == null) {
     demoOptions.bg = 'outlined';
-  }
 
-  if (demoOptions.iframe) {
-    demoOptions.bg = true;
+    if (demoOptions.iframe) {
+      demoOptions.bg = true;
+    }
   }
 
   const [codeOpen, setCodeOpen] = React.useState(demoOptions.defaultCodeOpen || false);
@@ -752,97 +514,257 @@ export default function Demo(props) {
 
   React.useEffect(() => {
     const navigatedDemoName = getDemoName(window.location.hash);
-    if (demoName === navigatedDemoName) {
+    if (navigatedDemoName && demoName === navigatedDemoName) {
       setCodeOpen(true);
     }
   }, [demoName]);
 
-  const jsx = getJsxPreview(demoData.raw || '');
   const showPreview =
     !demoOptions.hideToolbar &&
     demoOptions.defaultCodeOpen !== false &&
-    jsx !== demoData.raw &&
-    jsx.split(/\n/).length <= 17;
+    Boolean(demoData.jsxPreview);
 
-  const [demoKey, resetDemo] = React.useReducer((key) => key + 1, 0);
+  const [demoKey, setDemoKey] = React.useReducer((key) => key + 1, 0);
 
-  const demoId = useUniqueId('demo-');
-  const demoSourceId = useUniqueId(`demoSource-`);
+  const demoId = `demo-${useId()}`;
+  const demoSourceId = `demoSource-${useId()}`;
   const openDemoSource = codeOpen || showPreview;
 
   const initialFocusRef = React.useRef(null);
 
   const [showAd, setShowAd] = React.useState(false);
+  const adVisibility = showAd && !disableAd && !demoOptions.disableAd;
+
+  const DemoRoot = demoData.productId === 'joy-ui' ? DemoRootJoy : DemoRootMaterial;
+  const Wrapper = demoData.productId === 'joy-ui' ? BrandingProvider : React.Fragment;
+
+  const isPreview = !codeOpen && showPreview;
+
+  const initialEditorCode = isPreview
+    ? demoData.jsxPreview
+    : // Prettier remove all the leading lines except for the last one, remove it as we don't
+      // need it in the live edit view.
+      demoData.raw.replace(/\n$/, '');
+  const [editorCode, setEditorCode] = React.useState({
+    value: initialEditorCode,
+    isPreview,
+    initialEditorCode,
+  });
+
+  const resetDemo = React.useMemo(
+    () => () => {
+      setEditorCode({
+        value: initialEditorCode,
+        isPreview,
+        initialEditorCode,
+      });
+      setDemoKey();
+    },
+    [setEditorCode, setDemoKey, initialEditorCode, isPreview],
+  );
+
+  React.useEffect(() => {
+    setEditorCode({
+      value: initialEditorCode,
+      isPreview,
+      initialEditorCode,
+    });
+  }, [initialEditorCode, isPreview]);
+
+  const [debouncedError, setDebouncedError] = React.useState(null);
+
+  const [liveDemoActive, setLiveDemoActive] = React.useState(false);
+
+  const demoElement = useDemoElement({
+    demoData,
+    editorCode,
+    setDebouncedError,
+    liveDemoActive,
+  });
+
+  const [activeTab, setActiveTab] = React.useState(0);
+  const handleTabChange = (event, newValue) => {
+    setActiveTab(newValue);
+  };
+  const ownerState = { mounted: true, contained: true };
+
+  const tabs = React.useMemo(() => {
+    if (!demoData.relativeModules) {
+      return [{ module: demoData.module, raw: demoData.raw }];
+    }
+    let demoModule = demoData.module;
+    if (codeVariant === CODE_VARIANTS.TS && demo.moduleTS) {
+      demoModule =
+        demo.moduleTS === demo.module ? demoData.module.replace(/\.js$/, '.tsx') : demo.moduleTS;
+    }
+
+    return [{ module: demoModule, raw: demoData.raw }, ...demoData.relativeModules];
+  }, [
+    codeVariant,
+    demo.moduleTS,
+    demo.module,
+    demoData.module,
+    demoData.raw,
+    demoData.relativeModules,
+  ]);
+
+  const [copiedContent, setCopiedContent] = React.useState(false);
+
+  const handleCopyClick = async () => {
+    try {
+      const activeTabData = tabs[activeTab];
+      await copy(activeTabData.raw);
+      setCopiedContent(true);
+      setTimeout(() => {
+        setCopiedContent(false);
+      }, 1000);
+    } catch (error) {
+      console.error('Code content not copied', error);
+    }
+  };
 
   return (
-    <div className={classes.root}>
-      <div
-        className={clsx(classes.demo, {
-          [classes.demoHiddenToolbar]: demoOptions.hideToolbar,
-          [classes.demoBgOutlined]: demoOptions.bg === 'outlined',
-          [classes.demoBgTrue]: demoOptions.bg === true,
-          [classes.demoBgInline]: demoOptions.bg === 'inline',
-        })}
-        id={demoId}
-        onMouseEnter={handleDemoHover}
-        onMouseLeave={handleDemoHover}
-      >
-        <IconButton
-          aria-label={t('initialFocusLabel')}
-          className={classes.initialFocus}
-          action={initialFocusRef}
-          tabIndex={-1}
-        />
-        <DemoSandboxed
+    <Root>
+      <AnchorLink id={demoName} />
+      <DemoRoot hideToolbar={demoOptions.hideToolbar} bg={demoOptions.bg} id={demoId}>
+        <Wrapper {...(demoData.productId === 'joy-ui' && { mode })}>
+          <InitialFocus
+            aria-label={t('initialFocusLabel')}
+            action={initialFocusRef}
+            tabIndex={-1}
+          />
+        </Wrapper>
+        <DemoSandbox
           key={demoKey}
           style={demoSandboxedStyle}
-          component={DemoComponent}
           iframe={demoOptions.iframe}
+          usesCssVarsTheme={demoData.productId === 'joy-ui'}
           name={demoName}
           onResetDemoClick={resetDemo}
-        />
-      </div>
-      <div className={classes.anchorLink} id={`${demoName}.js`} />
-      <div className={classes.anchorLink} id={`${demoName}.tsx`} />
+        >
+          {demoElement}
+        </DemoSandbox>
+      </DemoRoot>
+      {/* TODO: Wrapper shouldn't be needed, it should already be at the top of the docs page */}
       {demoOptions.hideToolbar ? null : (
-        <DemoToolbar
-          codeOpen={codeOpen}
-          codeVariant={codeVariant}
-          demo={demo}
-          demoData={demoData}
-          demoHovered={demoHovered}
-          demoId={demoId}
-          demoName={demoName}
-          demoOptions={demoOptions}
-          demoSourceId={demoSourceId}
-          initialFocusRef={initialFocusRef}
-          onCodeOpenChange={() => {
-            setCodeOpen((open) => !open);
-            setShowAd(true);
-          }}
-          onResetDemoClick={resetDemo}
-          openDemoSource={openDemoSource}
-          showPreview={showPreview}
-        />
+        <Wrapper {...(demoData.productId === 'joy-ui' ? { mode } : {})}>
+          {Object.keys(stylingSolutionMapping).map((key) => (
+            <React.Fragment key={key}>
+              <AnchorLink id={`${stylingSolutionMapping[key]}-${demoName}.js`} />
+              <AnchorLink id={`${stylingSolutionMapping[key]}-${demoName}.tsx`} />
+            </React.Fragment>
+          ))}
+          <AnchorLink id={`${demoName}.js`} />
+          <AnchorLink id={`${demoName}.tsx`} />
+          <DemoToolbarRoot demoOptions={demoOptions} openDemoSource={openDemoSource}>
+            <NoSsr fallback={<DemoToolbarFallback />}>
+              <React.Suspense fallback={<DemoToolbarFallback />}>
+                <DemoToolbar
+                  codeOpen={codeOpen}
+                  codeVariant={codeVariant}
+                  copyIcon={
+                    copiedContent ? <LibraryAddCheckRoundedIcon /> : <ContentCopyRoundedIcon />
+                  }
+                  copyButtonOnClick={handleCopyClick}
+                  hasNonSystemDemos={hasNonSystemDemos}
+                  demo={demo}
+                  demoData={demoData}
+                  demoId={demoId}
+                  demoName={demoName}
+                  demoOptions={demoOptions}
+                  demoSourceId={demoSourceId}
+                  initialFocusRef={initialFocusRef}
+                  onCodeOpenChange={() => {
+                    setCodeOpen((open) => !open);
+                    setShowAd(true);
+                  }}
+                  onResetDemoClick={resetDemo}
+                  openDemoSource={openDemoSource}
+                  showPreview={showPreview}
+                />
+              </React.Suspense>
+            </NoSsr>
+          </DemoToolbarRoot>
+          <Tabs value={activeTab} onChange={handleTabChange}>
+            {demoData.relativeModules && openDemoSource && !editorCode.isPreview ? (
+              <CodeTabList ownerState={ownerState}>
+                {tabs.map((tab, index) => (
+                  <CodeTab
+                    sx={selectionOverride}
+                    ownerState={ownerState}
+                    key={tab.module}
+                    value={index}
+                  >
+                    {tab.module}
+                  </CodeTab>
+                ))}
+              </CodeTabList>
+            ) : null}
+            <Collapse in={openDemoSource} unmountOnExit timeout={150}>
+              {/* A limitation from https://github.com/nihgwu/react-runner,
+                we can't inject the `window` of the iframe so we need a disableLiveEdit option. */}
+              {tabs.map((tab, index) => (
+                <TabPanel value={index} index={index} key={index}>
+                  {demoOptions.disableLiveEdit || index > 0 ? (
+                    <DemoCodeViewer
+                      key={index}
+                      code={tab.raw}
+                      id={demoSourceId}
+                      language={demoData.sourceLanguage}
+                      copyButtonProps={{
+                        'data-ga-event-category': codeOpen ? 'demo-expand' : 'demo',
+                        'data-ga-event-label': demo.gaLabel,
+                        'data-ga-event-action': 'copy-click',
+                      }}
+                      sx={{
+                        '& .MuiCode-copy': {
+                          display: 'none',
+                        },
+                      }}
+                    />
+                  ) : (
+                    <DemoEditor
+                      // Mount a new text editor when the preview mode change to reset the undo/redo history.
+                      key={editorCode.isPreview}
+                      value={editorCode.value}
+                      onChange={(value) => {
+                        setEditorCode({
+                          ...editorCode,
+                          value,
+                        });
+                      }}
+                      onFocus={() => {
+                        setLiveDemoActive(true);
+                      }}
+                      id={demoSourceId}
+                      language={demoData.sourceLanguage}
+                      copyButtonProps={{
+                        'data-ga-event-category': codeOpen ? 'demo-expand' : 'demo',
+                        'data-ga-event-label': demo.gaLabel,
+                        'data-ga-event-action': 'copy-click',
+                      }}
+                    >
+                      <DemoEditorError>{debouncedError}</DemoEditorError>
+                    </DemoEditor>
+                  )}
+                </TabPanel>
+              ))}
+            </Collapse>
+          </Tabs>
+          {adVisibility ? <AdCarbonInline /> : null}
+        </Wrapper>
       )}
-      <Collapse in={openDemoSource} unmountOnExit>
-        <div>
-          <HighlightedCode
-            className={classes.code}
-            id={demoSourceId}
-            code={showPreview && !codeOpen ? jsx : demoData.raw}
-            language={demoData.sourceLanguage}
-          />
-        </div>
-      </Collapse>
-      {showAd && !disableAd && !demoOptions.disableAd ? <AdCarbonInline /> : null}
-    </div>
+    </Root>
   );
 }
 
 Demo.propTypes = {
   demo: PropTypes.object.isRequired,
+  /**
+   * The options provided with: {{"demo": "Name.js", …demoOptions}}
+   */
   demoOptions: PropTypes.object.isRequired,
   disableAd: PropTypes.bool.isRequired,
   githubLocation: PropTypes.string.isRequired,
+  mode: PropTypes.string, // temporary, just to make Joy docs work.
 };

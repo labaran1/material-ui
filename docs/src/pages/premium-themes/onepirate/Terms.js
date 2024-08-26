@@ -1,6 +1,6 @@
-import React from 'react';
-import Container from '@material-ui/core/Container';
-import Box from '@material-ui/core/Box';
+import * as React from 'react';
+import Container from '@mui/material/Container';
+import Box from '@mui/material/Box';
 import Markdown from './modules/components/Markdown';
 import Typography from './modules/components/Typography';
 import AppAppBar from './modules/views/AppAppBar';
@@ -13,7 +13,7 @@ function Terms() {
     <React.Fragment>
       <AppAppBar />
       <Container>
-        <Box mt={7} mb={12}>
+        <Box sx={{ mt: 7, mb: 12 }}>
           <Typography variant="h3" gutterBottom marked="center" align="center">
             Terms
           </Typography>

@@ -1,245 +1,107 @@
 import * as React from 'react';
 import PropTypes from 'prop-types';
-import clsx from 'clsx';
-import { useSelector } from 'react-redux';
-import { withStyles } from '@material-ui/core/styles';
-import ChevronRightIcon from '@material-ui/icons/ChevronRight';
-import ChevronLeftIcon from '@material-ui/icons/ChevronLeft';
-import Button from '@material-ui/core/Button';
-import Divider from '@material-ui/core/Divider';
-import Head from 'docs/src/modules/components/Head';
-import AppFrame from 'docs/src/modules/components/AppFrame';
-import EditPage from 'docs/src/modules/components/EditPage';
-import AppContainer from 'docs/src/modules/components/AppContainer';
-import PageContext from 'docs/src/modules/components/PageContext';
-import { pageToTitleI18n } from 'docs/src/modules/utils/helpers';
-import Link from 'docs/src/modules/components/Link';
-import { exactProp } from '@material-ui/utils';
-import { SOURCE_CODE_ROOT_URL } from 'docs/src/modules/constants';
-import Demo from 'docs/src/modules/components/Demo';
-import AppTableOfContents from 'docs/src/modules/components/AppTableOfContents';
-import MarkdownElement from 'docs/src/modules/components/MarkdownElement';
-import Ad from 'docs/src/modules/components/Ad';
-import AdManager from 'docs/src/modules/components/AdManager';
-import AdGuest from 'docs/src/modules/components/AdGuest';
-import ComponentLinkHeader from 'docs/src/modules/components/ComponentLinkHeader';
+import { useRouter } from 'next/router';
+import { useTheme } from '@mui/system';
+import { exactProp } from '@mui/utils';
+import { CssVarsProvider as JoyCssVarsProvider, useColorScheme } from '@mui/joy/styles';
+import { Ad, AdGuest } from '@mui/docs/Ad';
+import RichMarkdownElement from 'docs/src/modules/components/RichMarkdownElement';
+import { pathnameToLanguage } from 'docs/src/modules/utils/helpers';
+import AppLayoutDocs from 'docs/src/modules/components/AppLayoutDocs';
+import { useUserLanguage } from '@mui/docs/i18n';
+import { BrandingProvider } from '@mui/docs/branding';
 
-const markdownComponents = {
-  'modules/components/ComponentLinkHeader.js': ComponentLinkHeader,
+function JoyModeObserver({ mode }) {
+  const { setMode } = useColorScheme();
+  React.useEffect(() => {
+    setMode(mode);
+  }, [mode, setMode]);
+  return null;
+}
+
+JoyModeObserver.propTypes = {
+  mode: PropTypes.oneOf(['light', 'dark']),
 };
 
-function flattenPages(pages, current = []) {
-  return pages.reduce((items, item) => {
-    if (item.children && item.children.length > 1) {
-      items = flattenPages(item.children, items);
-    } else {
-      items.push(item.children && item.children.length === 1 ? item.children[0] : item);
-    }
-    return items;
-  }, current);
-}
+export default function MarkdownDocs(props) {
+  const theme = useTheme();
+  const router = useRouter();
+  const { canonicalAs } = pathnameToLanguage(router.asPath);
+  const {
+    disableAd = false,
+    disableToc = false,
+    /**
+     * Some pages, for example Joy theme builder, should not be a nested CssVarsProvider to control its own state.
+     * This config will skip the CssVarsProvider at the root of the page.
+     */
+    disableCssVarsProvider = false,
+    demos = {},
+    docs,
+    demoComponents,
+    srcComponents,
+  } = props;
 
-// To replace with .findIndex() once we stop IE11 support.
-function findIndex(array, comp) {
-  for (let i = 0; i < array.length; i += 1) {
-    if (comp(array[i])) {
-      return i;
-    }
-  }
+  const userLanguage = useUserLanguage();
+  const localizedDoc = docs[userLanguage] || docs.en;
 
-  return -1;
-}
-
-const styles = (theme) => ({
-  root: {
-    width: '100%',
-  },
-  container: {
-    position: 'relative',
-  },
-  actions: {
-    position: 'absolute',
-    right: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-  },
-  ad: {
-    '& .description': {
-      marginBottom: 198,
-    },
-    '& .description.ad': {
-      marginBottom: 40,
-    },
-  },
-  toc: {
-    [theme.breakpoints.up('sm')]: {
-      width: 'calc(100% - 175px)',
-    },
-    [theme.breakpoints.up('lg')]: {
-      width: 'calc(100% - 175px - 240px)',
-    },
-  },
-  footer: {
-    marginTop: theme.spacing(12),
-  },
-  pagination: {
-    margin: theme.spacing(3, 0, 4),
-    display: 'flex',
-    justifyContent: 'space-between',
-  },
-  pageLinkButton: {
-    textTransform: 'none',
-    fontWeight: theme.typography.fontWeightRegular,
-  },
-});
-
-function MarkdownDocs(props) {
-  const { classes, disableAd = false, disableToc = false, demos = {}, docs, requireDemo } = props;
-
-  const t = useSelector((state) => state.options.t);
-  const userLanguage = useSelector((state) => state.options.userLanguage);
-  const { description, location, rendered, title, toc, headers } = docs[userLanguage] || docs.en;
-  if (description === undefined) {
-    throw new Error('Missing description in the page');
-  }
-
-  const { activePage, pages } = React.useContext(PageContext);
-  const pageList = flattenPages(pages);
-  const currentPageNum = findIndex(pageList, (page) => page.pathname === activePage?.pathname);
-  const currentPage = pageList[currentPageNum];
-  const prevPage = pageList[currentPageNum - 1];
-  const nextPage = pageList[currentPageNum + 1];
+  const isJoy = canonicalAs.startsWith('/joy-ui/') && !disableCssVarsProvider;
+  const CssVarsProvider = isJoy ? JoyCssVarsProvider : React.Fragment;
+  const Wrapper = isJoy ? BrandingProvider : React.Fragment;
+  const wrapperProps = {
+    ...(isJoy && { mode: theme.palette.mode }),
+  };
 
   return (
-    <AppFrame>
-      <AdManager>
-        <Head title={`${title} - Material-UI`} description={description} />
-        {disableAd ? null : (
+    <AppLayoutDocs
+      cardOptions={{
+        description: localizedDoc.headers.cardDescription,
+        title: localizedDoc.headers.cardTitle,
+      }}
+      description={localizedDoc.description}
+      disableAd={disableAd}
+      disableToc={disableToc}
+      location={localizedDoc.location}
+      title={localizedDoc.title}
+      toc={localizedDoc.toc}
+    >
+      {disableAd ? null : (
+        <BrandingProvider>
           <AdGuest>
-            <Ad placement="body" />
+            <Ad />
           </AdGuest>
-        )}
-        <div
-          className={clsx(classes.root, {
-            [classes.ad]: !disableAd,
-            [classes.toc]: !disableToc,
-          })}
-        >
-          <AppContainer className={classes.container}>
-            <div className={classes.actions}>
-              <EditPage markdownLocation={location} />
-            </div>
-            {rendered.map((renderedMarkdownOrDemo, index) => {
-              if (typeof renderedMarkdownOrDemo === 'string') {
-                return <MarkdownElement key={index} renderedMarkdown={renderedMarkdownOrDemo} />;
-              }
-
-              if (renderedMarkdownOrDemo.component) {
-                const Component = markdownComponents[renderedMarkdownOrDemo.component];
-                return <Component key={index} headers={headers} options={renderedMarkdownOrDemo} />;
-              }
-
-              const name = renderedMarkdownOrDemo.demo;
-              const demo = demos?.[name];
-              if (demo === undefined) {
-                const errorMessage = [
-                  `Missing demo: ${name}. You can use one of the following:`,
-                  Object.keys(demos),
-                ].join('\n');
-
-                if (userLanguage === 'en') {
-                  throw new Error(errorMessage);
-                }
-
-                if (process.env.NODE_ENV !== 'production') {
-                  console.error(errorMessage);
-                }
-
-                const warnIcon = (
-                  <span role="img" aria-label={t('emojiWarning')}>
-                    ⚠️
-                  </span>
-                );
-                return (
-                  <div key={index}>
-                    {/* eslint-disable-next-line material-ui/no-hardcoded-labels */}
-                    {warnIcon} Missing demo `{name}` {warnIcon}
-                  </div>
-                );
-              }
-
-              return (
-                <Demo
-                  key={index}
-                  demo={{
-                    raw: demo.raw,
-                    js: requireDemo(demo.module).default,
-                    rawTS: demo.rawTS,
-                    tsx: demo.moduleTS ? requireDemo(demo.moduleTS).default : null,
-                  }}
-                  disableAd={disableAd}
-                  demoOptions={renderedMarkdownOrDemo}
-                  githubLocation={`${SOURCE_CODE_ROOT_URL}/docs/src/${name}`}
-                />
-              );
-            })}
-            <footer className={classes.footer}>
-              {!currentPage ||
-              currentPage.displayNav === false ||
-              (nextPage.displayNav === false && !prevPage) ? null : (
-                <React.Fragment>
-                  <Divider />
-                  <div className={classes.pagination}>
-                    {prevPage ? (
-                      <Button
-                        component={Link}
-                        naked
-                        href={prevPage.pathname}
-                        size="large"
-                        className={classes.pageLinkButton}
-                        startIcon={<ChevronLeftIcon />}
-                      >
-                        {pageToTitleI18n(prevPage, t)}
-                      </Button>
-                    ) : (
-                      <div />
-                    )}
-                    {nextPage.displayNav === false ? null : (
-                      <Button
-                        component={Link}
-                        naked
-                        href={nextPage.pathname}
-                        size="large"
-                        className={classes.pageLinkButton}
-                        endIcon={<ChevronRightIcon />}
-                      >
-                        {pageToTitleI18n(nextPage, t)}
-                      </Button>
-                    )}
-                  </div>
-                </React.Fragment>
-              )}
-            </footer>
-          </AppContainer>
-        </div>
-        {disableToc ? null : <AppTableOfContents items={toc} />}
-      </AdManager>
-    </AppFrame>
+        </BrandingProvider>
+      )}
+      <CssVarsProvider>
+        {isJoy && <JoyModeObserver mode={theme.palette.mode} />}
+        {localizedDoc.rendered.map((renderedMarkdownOrDemo, index) => (
+          <RichMarkdownElement
+            key={`demos-section-${index}`}
+            demoComponents={demoComponents}
+            demos={demos}
+            disableAd={disableAd}
+            localizedDoc={localizedDoc}
+            renderedMarkdownOrDemo={renderedMarkdownOrDemo}
+            srcComponents={srcComponents}
+            theme={theme}
+            WrapperComponent={Wrapper}
+            wrapperProps={wrapperProps}
+          />
+        ))}
+      </CssVarsProvider>
+    </AppLayoutDocs>
   );
 }
 
 MarkdownDocs.propTypes = {
-  classes: PropTypes.object.isRequired,
+  demoComponents: PropTypes.object,
   demos: PropTypes.object,
   disableAd: PropTypes.bool,
+  disableCssVarsProvider: PropTypes.bool,
   disableToc: PropTypes.bool,
   docs: PropTypes.object.isRequired,
-  requireDemo: PropTypes.func,
+  srcComponents: PropTypes.object,
 };
 
 if (process.env.NODE_ENV !== 'production') {
   MarkdownDocs.propTypes = exactProp(MarkdownDocs.propTypes);
 }
-
-export default withStyles(styles)(MarkdownDocs);

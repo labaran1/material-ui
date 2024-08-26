@@ -7,14 +7,13 @@ const ruleTester = new eslint.RuleTester({
 });
 ruleTester.run('disallow-active-element-as-key-event-target', rule, {
   valid: [
-    "import { fireEvent } from 'test/utils';\nfireEvent.keyDown(getByRole('button'), { key: ' ' })",
-    "import { fireEvent } from 'test/utils';\nfireEvent.keyDown(document.body, { key: 'Esc' })",
-    "import { fireEvent } from 'test/utils';\nfireEvent.keyUp(document.body, { key: 'Tab' })",
+    "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyDown(getByRole('button'), { key: ' ' })",
+    "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyDown(document.body, { key: 'Esc' })",
+    "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyUp(document.body, { key: 'Tab' })",
   ],
   invalid: [
     {
-      code:
-        "import { fireEvent } from 'test/utils';\nfireEvent.keyUp(document.activeElement, { key: 'LeftArrow' })",
+      code: "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyUp(document.activeElement, { key: 'LeftArrow' })",
       errors: [
         {
           message:
@@ -24,8 +23,7 @@ ruleTester.run('disallow-active-element-as-key-event-target', rule, {
       ],
     },
     {
-      code:
-        "import { fireEvent } from 'test/utils';\nfireEvent.keyDown(document.activeElement, { key: 'DownArrow' })",
+      code: "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyDown(document.activeElement, { key: 'DownArrow' })",
       errors: [
         {
           message:
@@ -35,8 +33,7 @@ ruleTester.run('disallow-active-element-as-key-event-target', rule, {
       ],
     },
     {
-      code:
-        "import { fireEvent } from 'any-path';\nfireEvent.keyDown(document.activeElement, { key: 'DownArrow' })",
+      code: "import { fireEvent } from 'any-path';\nfireEvent.keyDown(document.activeElement, { key: 'DownArrow' })",
       errors: [
         {
           message:
@@ -52,6 +49,17 @@ ruleTester.run('disallow-active-element-as-key-event-target', rule, {
           message:
             "Don't use document.activeElement as a target for keyboard events. Prefer the actual element.",
           type: 'MemberExpression',
+        },
+      ],
+    },
+    {
+      // test non-null assertion operator
+      code: "import { fireEvent } from '@mui/internal-test-utils';\nfireEvent.keyUp(document.activeElement!, { key: 'LeftArrow' })",
+      errors: [
+        {
+          message:
+            "Don't use document.activeElement as a target for keyboard events. Prefer the actual element.",
+          type: 'TSNonNullExpression',
         },
       ],
     },

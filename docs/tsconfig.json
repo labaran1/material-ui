@@ -1,16 +1,18 @@
 {
   "extends": "../tsconfig.json",
-  "include": ["next-env.d.ts", "types", "src/pages/**/*"],
+  "include": ["next-env.d.ts", "types", "src", "pages", "data", "next.config.mjs"],
   "compilerOptions": {
-    "allowJs": false,
+    "moduleResolution": "Bundler",
+    "allowJs": true,
     "isolatedModules": true,
     /* files are emitted by babel */
     "noEmit": true,
     "noUnusedLocals": true,
     "resolveJsonModule": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "esModuleInterop": true,
-    "types": ["react"]
+    "types": ["react", "mocha"],
+    "incremental": true
   },
   "exclude": ["node_modules"]
 }
